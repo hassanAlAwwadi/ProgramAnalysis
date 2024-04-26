@@ -5,7 +5,7 @@ import Language.Prims
 import Language.Label 
 import Data.List as L(foldl') 
 import Prelude hiding(init)
-import qualified Data.Recursive.Set as RS
+--import qualified Data.Recursive.Set as RS
 import Data.Either (rights)
 
 class CFA l where 
@@ -91,26 +91,26 @@ free_in_stmt et = go et (S.empty) where
   go (Assign s e) = (S.insert s) . (S.union $ free_in_expr e)
 
 -- | produces the true kill function for each block
-kill :: Map Label (Either Stmt Expr) -> Map Label (RS.RSet Expr -> RS.RSet Expr) 
+kill :: Map Label (Either Stmt Expr) -> Map Label (Set Expr -> Set Expr) 
 kill = M.map go where 
   go (Right _) = id
   go (Left st) = case st of 
     Skip       -> id
-    Assign s _ -> RS.filter (\e -> S.notMember  s $ free_in_expr e) -- could do that trie that match thingy... might be faster
+    Assign s _ -> S.filter (\e -> S.notMember  s $ free_in_expr e) -- could do that trie that match thingy... might be faster
    
 -- | produce a gen function for each stmt
-gen :: Map Label (Either Stmt Expr) -> Map Label (RS.RSet Expr -> RS.RSet Expr)  
+gen :: Map Label (Either Stmt Expr) -> Map Label (Set Expr -> Set Expr)  
 gen = M.map go where 
   go (Right ex)  = go' ex
   go (Left st) = case st of 
     Skip       -> id 
     Assign _ e -> go' e
-  go' :: Expr -> RS.RSet Expr -> RS.RSet Expr
+  go' :: Expr -> Set Expr -> Set Expr
   go' (V _) = id --trivially available
-  go' (I _) = id --trivially available             
-  go' (B _) = id --trivially available 
-  go' (P _) = id --trivially available
-  go' (A f v) = RS.insert (A f v) . go' f . go' v
+  go' (I _) = id              
+  go' (B _) = id  
+  go' (P _) = id 
+  go' (A f v) = S.insert (A f v) . go' f . go' v
 
 available_expression :: CFA l => l -> Map Label (Set Expr)
 available_expression program = let 
@@ -119,17 +119,19 @@ available_expression program = let
   gens  = gen stmts 
   e     = flows program
   start = init program
-  exps  = RS.mk . S.fromList . rights $ M.elems stmts
+  exps  = foldMap  id (M.elems gens) $ S.empty 
   maxi  = M.map (const exps) stmts
-  acstr = M.insert start RS.empty maxi
-  res   = L.foldl' go acstr e
-  go :: Map Label (RS.RSet Expr) -> (Label, Label) -> Map Label (RS.RSet Expr)
+  acstr = M.insert start S.empty maxi
+  res   = iter (flip (L.foldl' go) e) acstr
+  go :: Map Label (Set Expr) -> (Label, Label) -> Map Label (Set Expr)
   go acc (from, to) = let
-    enter_set = res M.! from 
+    enter_set = acc M.! from 
     kl         = kills M.! from 
     gn         = gens  M.! from
     exit_set = kl . gn $ enter_set -- g . k $ enter_set???
-    in M.insertWith RS.intersection to exit_set acc 
+    in M.insertWith S.intersection to exit_set acc 
   
-  in RS.get `M.map` res where 
+  iter :: Eq a => (a -> a) -> a -> a
+  iter f a = let new = f a in if new == a then new else iter f new
+  in res where 
 
