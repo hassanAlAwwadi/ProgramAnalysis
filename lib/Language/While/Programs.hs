@@ -36,6 +36,20 @@ yltapb = Seq
     )
   )
 
+fact :: While 
+fact = Seq 
+  (Stat    1 (Assign "x" (I 5)))
+  (Seq
+    (Stat    2 (Assign "y" (I 1)))
+    (While 3 
+      (V "x" `gt` I 1)
+      (Seq 
+        (Stat  4 (Assign "y" ((V "x") `pl` (V "y"))))
+        (Stat  5 (Assign "x" ((V "x") `mn` (I 1  ))))
+      )
+    )
+  )
+
 gt :: Expr -> Expr -> Expr
 gt l r = A (A (P Gt) l) r
 

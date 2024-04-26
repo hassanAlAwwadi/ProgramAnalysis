@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase #-}
 module Language.CFA where 
 import Data.Map as M
 import Data.Set as S
@@ -6,7 +7,6 @@ import Language.Label
 import Data.List as L(foldl') 
 import Prelude hiding(init)
 --import qualified Data.Recursive.Set as RS
-import Data.Either (rights)
 
 class CFA l where 
   init   :: l -> Label 
@@ -90,27 +90,6 @@ free_in_stmt et = go et (S.empty) where
   go (Skip  )     = id
   go (Assign s e) = (S.insert s) . (S.union $ free_in_expr e)
 
--- | produces the true kill function for each block
-kill :: Map Label (Either Stmt Expr) -> Map Label (Set Expr -> Set Expr) 
-kill = M.map go where 
-  go (Right _) = id
-  go (Left st) = case st of 
-    Skip       -> id
-    Assign s _ -> S.filter (\e -> S.notMember  s $ free_in_expr e) -- could do that trie that match thingy... might be faster
-   
--- | produce a gen function for each stmt
-gen :: Map Label (Either Stmt Expr) -> Map Label (Set Expr -> Set Expr)  
-gen = M.map go where 
-  go (Right ex)  = go' ex
-  go (Left st) = case st of 
-    Skip       -> id 
-    Assign _ e -> go' e
-  go' :: Expr -> Set Expr -> Set Expr
-  go' (V _) = id --trivially available
-  go' (I _) = id              
-  go' (B _) = id  
-  go' (P _) = id 
-  go' (A f v) = S.insert (A f v) . {-- add partiall applied functions? go' f . --} go' v
 
 available_expression :: CFA l => l -> (Map Label (Set Expr), Map Label (Set Expr))
 available_expression program = let 
@@ -118,12 +97,12 @@ available_expression program = let
   kills = kill stmts
   gens  = gen stmts 
   kgs   = M.intersectionWith (.) kills gens
-  e     = flows program
+  edges = flows program
   start = init program
   exps  = foldMap  id (M.elems gens) $ S.empty 
   maxi  = M.map (const exps) stmts
   acstr = M.insert start S.empty maxi
-  res   = iter (flip (L.foldl' go) e) acstr
+  res   = iter (flip (L.foldl' go) edges) acstr
   go :: Map Label (Set Expr) -> (Label, Label) -> Map Label (Set Expr)
   go acc (from, to) = let
     enter_set = acc M.! from 
@@ -131,7 +110,64 @@ available_expression program = let
     exit_set = kg $ enter_set -- g . k $ enter_set???
     in M.insertWith S.intersection to exit_set acc 
   
-  iter :: Eq a => (a -> a) -> a -> a
-  iter f a = let new = f a in if new == a then new else iter f new
+
+  -- | produces the true kill function for each block
+  kill :: Map Label (Either Stmt Expr) -> Map Label (Set Expr -> Set Expr) 
+  kill = M.map ga where 
+    ga  (Right _) = id
+    ga (Left st) = case st of 
+      Skip       -> id
+      Assign s _ -> S.filter (\e -> S.notMember  s $ free_in_expr e) -- could do that trie that match thingy... might be faster
+   
+  -- | produce a gen function for each stmt
+  gen :: Map Label (Either Stmt Expr) -> Map Label (Set Expr -> Set Expr)  
+  gen = M.map ga where 
+    ga (Right ex)  = ga' ex
+    ga (Left st) = case st of 
+      Skip       -> id 
+      Assign _ ex -> ga' ex
+    ga' :: Expr -> Set Expr -> Set Expr
+    ga' (V _) = id --trivially available
+    ga' (I _) = id              
+    ga' (B _) = id  
+    ga' (P _) = id 
+    ga' (A f v) = S.insert (A f v) . {-- add partiall applied functions? go' f . --} ga' v
+
   in (res, (M.intersectionWith ($) kgs res)) where 
 
+
+type Source = Maybe Label
+reaching_definition :: CFA l => l -> (Map Label (Set (String, Source)), Map Label (Set (String, Source)))
+reaching_definition program = let 
+  stmts = blocks program  
+  kgs   = killgen stmts
+  e     = flows program
+  start = init program
+  fv    = S.map ((,Nothing)) . S.unions . M.elems $ M.map (either free_in_stmt free_in_expr ) stmts 
+  acstr = M.insert start fv M.empty
+  res   = iter (flip (L.foldl' go) e) acstr
+  go :: Map Label (Set (String, Source)) -> (Label, Label) -> Map Label (Set (String, Source))
+  go acc (from, to) = let
+    enter_set = acc M.! from 
+    kg        = kgs M.! from 
+    exit_set  = kg enter_set 
+    in M.alter (go' exit_set) to acc where 
+      go' :: Set (String, Source) -> Maybe (Set (String, Source))  -> Maybe (Set (String, Source))
+      go' source = \case 
+        Nothing       -> Just source 
+        Just  target' -> Just $ S.union target' source
+
+    -- | produces the true kill function for each block
+  killgen :: Map Label (Either Stmt Expr) -> Map Label ((Set (String, Source)) -> (Set (String, Source))) 
+  killgen = M.mapWithKey ga where 
+    ga _ (Right _) = id
+    ga l (Left st) = case st of 
+      Skip       -> id
+      Assign s _ -> S.insert (s, (Just l)) . S.filter (\(s', _) -> s' /= s)
+   
+
+  in (res, (M.intersectionWith ($) kgs res)) where 
+
+  
+iter :: Eq a => (a -> a) -> a -> a
+iter f a = let new = f a in if new == a then new else iter f new
