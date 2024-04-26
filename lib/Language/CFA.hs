@@ -6,7 +6,7 @@ import Language.Prims
 import Language.Label 
 import Data.List as L(foldl') 
 import Prelude hiding(init)
---import qualified Data.Recursive.Set as RS
+import qualified Data.Recursive.Set as RS
 
 class CFA l where 
   init   :: l -> Label 
@@ -163,7 +163,7 @@ reaching_definition program = let
     ga _ (Right _) = id
     ga l (Left st) = case st of 
       Skip       -> id
-      Assign s _ -> S.insert (s, (Just l)) . S.filter (\(s', _) -> s' /= s)
+      Assign s _ -> S.insert (s, (Just l)) . S.filter (\(s', _) -> s' /= s) -- feels like I can do better than filter, turning it into two instances of takeWhileAntitone somehow...
    
 
   in (res, (M.intersectionWith ($) kgs res)) where 
@@ -171,3 +171,38 @@ reaching_definition program = let
   
 iter :: Eq a => (a -> a) -> a -> a
 iter f a = let new = f a in if new == a then new else iter f new
+
+
+-- using RS.RSet internally! 
+-- how cool
+reaching_definition' :: CFA l => l -> (Map Label (Set (String, Source)), Map Label (Set (String, Source)))
+reaching_definition' program = let 
+  stmts = blocks program  
+  kgs   = killgen stmts
+  e     = flows program
+  start = init program
+  fv    = RS.mk $ S.map ((,Nothing)) . S.unions . M.elems $ M.map (either free_in_stmt free_in_expr ) stmts 
+  acstr = M.insert start fv M.empty
+  res   = L.foldl' go acstr e
+  go :: Map Label (RS.RSet (String, Source)) -> (Label, Label) -> Map Label (RS.RSet (String, Source))
+  go acc (from, to) = let
+    enter_set = res M.! from 
+    kg        = kgs M.! from 
+    exit_set  = kg enter_set 
+    in M.alter (go' exit_set) to acc where 
+      go' :: RS.RSet (String, Source) -> Maybe (RS.RSet (String, Source))  -> Maybe (RS.RSet (String, Source))
+      go' source = \case 
+        Nothing       -> Just source 
+        Just  target' -> Just $ RS.union target' source
+
+    -- | produces the true kill function for each block
+  killgen :: Map Label (Either Stmt Expr) -> Map Label ((RS.RSet (String, Source)) -> (RS.RSet (String, Source))) 
+  killgen = M.mapWithKey ga where 
+    ga _ (Right _) = id
+    ga l (Left st) = case st of 
+      Skip       -> id
+      Assign s _ -> RS.insert (s, (Just l)) . RS.filter (\(s', _) -> s' /= s) -- feels like I can do better than filter, turning it into two instances of takeWhileAntitone somehow...
+   
+
+  in (RS.get <$> res, (RS.get <$> M.intersectionWith ($) kgs res)) where 
+
