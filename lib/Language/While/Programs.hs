@@ -22,6 +22,20 @@ simple = Seq
     (Stat 3 Skip)
   ) 
 
+yltapb :: While
+yltapb = Seq 
+  (Stat    1 (Assign "x" ((V "a") `pl` (V "b"))))
+  (Seq
+    (Stat  2 (Assign "y" ((V "a") `ml` (V "b"))))
+    (While 3 
+      (V "y" `gt` ((V "a") `pl` (V "b")))
+      (Seq 
+        (Stat  4 (Assign "a" ((V "a") `pl` (I 1))))
+        (Stat  5 (Assign "x" ((V "a") `pl` (V "b"))))
+      )
+    )
+  )
+
 gt :: Expr -> Expr -> Expr
 gt l r = A (A (P Gt) l) r
 

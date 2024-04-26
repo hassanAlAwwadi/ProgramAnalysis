@@ -110,13 +110,14 @@ gen = M.map go where
   go' (I _) = id              
   go' (B _) = id  
   go' (P _) = id 
-  go' (A f v) = S.insert (A f v) . go' f . go' v
+  go' (A f v) = S.insert (A f v) . {-- add partiall applied functions? go' f . --} go' v
 
-available_expression :: CFA l => l -> Map Label (Set Expr)
+available_expression :: CFA l => l -> (Map Label (Set Expr), Map Label (Set Expr))
 available_expression program = let 
   stmts = blocks program  
   kills = kill stmts
   gens  = gen stmts 
+  kgs   = M.intersectionWith (.) kills gens
   e     = flows program
   start = init program
   exps  = foldMap  id (M.elems gens) $ S.empty 
@@ -126,12 +127,11 @@ available_expression program = let
   go :: Map Label (Set Expr) -> (Label, Label) -> Map Label (Set Expr)
   go acc (from, to) = let
     enter_set = acc M.! from 
-    kl         = kills M.! from 
-    gn         = gens  M.! from
-    exit_set = kl . gn $ enter_set -- g . k $ enter_set???
+    kg         = kgs M.! from 
+    exit_set = kg $ enter_set -- g . k $ enter_set???
     in M.insertWith S.intersection to exit_set acc 
   
   iter :: Eq a => (a -> a) -> a -> a
   iter f a = let new = f a in if new == a then new else iter f new
-  in res where 
+  in (res, (M.intersectionWith ($) kgs res)) where 
 
