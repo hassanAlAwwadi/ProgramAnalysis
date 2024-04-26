@@ -91,30 +91,38 @@ free_in_stmt et = go et (S.empty) where
   go (Assign s e) = (S.insert s) . (S.union $ free_in_expr e)
 
 -- | produces the true kill function for each block
-kill :: Graph -> Map Label (RS.RSet Expr -> RS.RSet Expr) 
-kill (Graph _ n _ _) = M.map go n where 
+kill :: Map Label (Either Stmt Expr) -> Map Label (RS.RSet Expr -> RS.RSet Expr) 
+kill = M.map go where 
   go (Right _) = id
   go (Left st) = case st of 
     Skip       -> id
-    Assign s _ -> RS.filter (\e -> S.notMember  s $ free_in_expr e) -- could do a trie that match thingy... might be faster
+    Assign s _ -> RS.filter (\e -> S.notMember  s $ free_in_expr e) -- could do that trie that match thingy... might be faster
    
-
-gen :: Graph -> Map Label (RS.RSet Expr -> RS.RSet Expr)  
-gen (Graph _ n _ _) = M.map go n where 
-  go (Right ex)  = RS.insert ex 
+-- | produce a gen function for each stmt
+gen :: Map Label (Either Stmt Expr) -> Map Label (RS.RSet Expr -> RS.RSet Expr)  
+gen = M.map go where 
+  go (Right ex)  = go' ex
   go (Left st) = case st of 
     Skip       -> id 
-    Assign _ e -> RS.insert e
+    Assign _ e -> go' e
+  go' :: Expr -> RS.RSet Expr -> RS.RSet Expr
+  go' (V _) = id --trivially available
+  go' (I _) = id --trivially available             
+  go' (B _) = id --trivially available 
+  go' (P _) = id --trivially available
+  go' (A f v) = RS.insert (A f v) . go' f . go' v
 
-available_expression :: Graph -> Map Label (Set Expr)
-available_expression g@(Graph start n e _) = let 
-  kills = kill g 
-  gens  = gen g 
-  e'    = simpler e
-  exps  = RS.mk . S.fromList . rights $ M.elems n
-  maxi  = M.fromSet (const exps) start
-  acstr = L.foldl' (\m l -> M.insert l RS.empty m) maxi (S.toList start)
-  res   = L.foldl' go acstr e'
+available_expression :: CFA l => l -> Map Label (Set Expr)
+available_expression program = let 
+  stmts = blocks program  
+  kills = kill stmts
+  gens  = gen stmts 
+  e     = flows program
+  start = init program
+  exps  = RS.mk . S.fromList . rights $ M.elems stmts
+  maxi  = M.map (const exps) stmts
+  acstr = M.insert start RS.empty maxi
+  res   = L.foldl' go acstr e
   go :: Map Label (RS.RSet Expr) -> (Label, Label) -> Map Label (RS.RSet Expr)
   go acc (from, to) = let
     enter_set = res M.! from 
@@ -123,12 +131,5 @@ available_expression g@(Graph start n e _) = let
     exit_set = kl . gn $ enter_set -- g . k $ enter_set???
     in M.insertWith RS.intersection to exit_set acc 
   
-  simpler :: Map Label (Set Label) -> [(Label, Label)]
-  simpler m = let 
-    m' = M.toList m 
-    app acc (s, es) = L.foldl' (app' s) acc es 
-    app' s' acc' en  = (s', en) : acc' 
-    in L.foldl' app [] m'  
-
   in RS.get `M.map` res where 
 

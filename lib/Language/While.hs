@@ -35,7 +35,7 @@ init (While l _ _) = l
 
 final :: While -> Set Label 
 final st = S.fromList $ go st [] where 
-  go :: While -> [Label] -> [Label] --Difflist style for efficiency
+  go :: While -> [Label] -> [Label]
   go (Stat l _)    = (l :) 
   go (Seq _ s )    = go s 
   go (ITE _ _ l r) = go l . go r 
@@ -43,7 +43,7 @@ final st = S.fromList $ go st [] where
 
 blocks :: While -> Map Label (Either Stmt Expr)
 blocks st = M.fromList $ go st [] where 
-  go :: While -> [(Label, (Either Stmt Expr))] -> [(Label, (Either Stmt Expr))] --Difflist style for efficiency
+  go :: While -> [(Label, (Either Stmt Expr))] -> [(Label, (Either Stmt Expr))]
   go (Stat l s)     = ((l, Left s) : ) 
   go (Seq f s )     = go f . go s
   go (ITE n c l r)  = ((n, Right c) :) . go l . go r 
@@ -55,7 +55,7 @@ labels w = M.keysSet $ blocks w
 
 flows :: While -> Set (Label, Label)
 flows st = S.fromList $ go st [] where 
-  go :: While -> [(Label, Label)] -> [(Label, Label)] --Difflist style for efficiency
+  go :: While -> [(Label, Label)] -> [(Label, Label)]
   go (Stat _ _)     = id
   go (Seq f s )     = let 
     eof = S.toList $ final f 
